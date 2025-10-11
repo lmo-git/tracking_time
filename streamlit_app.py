@@ -6,6 +6,7 @@ from datetime import datetime
 from PIL import Image
 from pyzbar.pyzbar import decode
 import io
+import pytz  # ✅ เพิ่ม timezone support
 
 # ============================================
 # 🔐 Google Sheets Connection
@@ -111,7 +112,10 @@ if barcode_input:
         st.error("⚠️ QR Code ไม่ถูกต้อง (ต้องเป็น S1, S2, S3 หรือ S4 เท่านั้น)")
     else:
         try:
-            ts = datetime.now()
+            # ✅ ใช้เวลาประเทศไทย
+            tz = pytz.timezone("Asia/Bangkok")
+            ts = datetime.now(tz)
+
             df = get_all_scans()
             staName = lookup_station(code)
             lastScan = df[df["ทะเบียนรถ"] == plate].sort_values("ScanDateTime", ascending=False).head(1)
@@ -186,3 +190,4 @@ try:
     st.dataframe(df)
 except Exception as e:
     st.error(f"Cannot fetch Google Sheet: {e}")
+
