@@ -1,35 +1,50 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+from datetime import datetime
 
 # ============================================
-# 🔐 Google Sheet connection (using Streamlit secrets)
+# 🔐 Google Sheets Connection (via Streamlit Secrets)
 # ============================================
 SHEET_KEY = "1jRUsA6AxPVlPLeVgFexPYTRZycFCq72oevYQsISuMUs"
 SHEET_NAME = "sheet1"
 
-scope = [
+scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_info(
-    st.secrets["google_service_account"],
-    scopes=scope
-)
-
-client = gspread.authorize(creds)
+# Load credentials from Streamlit secrets
+json_key = st.secrets["gcp"]
+creds = Credentials.from_service_account_info(json_key, scopes=scopes)
+gc = gspread.authorize(creds)
 
 try:
-    sheet = client.open_by_key(SHEET_KEY).worksheet(SHEET_NAME)
+    sheet = gc.open_by_key(SHEET_KEY).worksheet(SHEET_NAME)
 except Exception as e:
     st.error(f"❌ Cannot open Google Sheet: {e}")
     st.stop()
 
 # ============================================
-# Mock stations (colStations)
+# 🧾 Ensure header row exists
+# ============================================
+expected_headers = [
+    "ทะเบียนรถ", "Barcode", "Barcode2", "Barcode3", "Barcode4",
+    "Station", "Station2", "Station3", "Station4",
+    "Time", "Time2", "Time3", "Time4", "สาเหตุ", "ScanDateTime"
+]
+
+try:
+    headers = sheet.row_values(1)
+    if headers != expected_headers:
+        sheet.insert_row(expected_headers, 1)
+        st.info("🧩 Header row created automatically in Google Sheet.")
+except Exception as e:
+    st.warning(f"Could not verify header row: {e}")
+
+# ============================================
+# 🚗 Mock Stations (colStations)
 # ============================================
 colStations = pd.DataFrame({
     "Code": ["S1", "S2", "S3", "S4"],
@@ -37,34 +52,31 @@ colStations = pd.DataFrame({
 })
 
 # ============================================
-# Streamlit UI
+# 🧍 Streamlit UI
 # ============================================
-st.title("🚛 Time Stamp System - TCRY")
+st.title("🚛 Time Tracking System")
 plate = st.text_input("ทะเบียนรถ (Plate Number):")
 barcode_input = st.text_input("Barcode code (S1 / S2 / S3 / S4):")
 reason = st.text_input("เหตุผล (ถ้ามี):")
-save_status = ""
 
 # ============================================
-# Helper Functions
+# 🔧 Helper Functions
 # ============================================
 def lookup_station(code):
     match = colStations[colStations["Code"] == code]
     return match["Name"].iloc[0] if not match.empty else "Unknown Station"
 
 def get_all_scans():
+    """Retrieve all scan records from Google Sheet"""
     data = sheet.get_all_records()
-    return pd.DataFrame(data) if data else pd.DataFrame(columns=[
-        "ทะเบียนรถ", "Barcode", "Barcode2", "Barcode3", "Barcode4",
-        "Station", "Station2", "Station3", "Station4",
-        "Time", "Time2", "Time3", "Time4", "สาเหตุ", "ScanDateTime"
-    ])
+    return pd.DataFrame(data) if data else pd.DataFrame(columns=expected_headers)
 
 def append_to_sheet(row_dict):
+    """Add new scan row"""
     sheet.append_row(list(row_dict.values()))
 
 def update_last_row(index, row_dict):
-    # gspread index starts at 1 (header row = 1)
+    """Update existing row by DataFrame index"""
     for i, (k, v) in enumerate(row_dict.items(), start=1):
         sheet.update_cell(index + 2, i, v)
 
@@ -77,7 +89,7 @@ def notify(message, type="info"):
         st.info(message)
 
 # ============================================
-# Main Logic
+# 🧠 Main Logic
 # ============================================
 if st.button("📷 Scan Now"):
     try:
@@ -93,7 +105,7 @@ if st.button("📷 Scan Now"):
             lastScan = df[df["ทะเบียนรถ"] == plate].sort_values("ScanDateTime", ascending=False).head(1)
             lastScan = lastScan.iloc[0] if not lastScan.empty else None
 
-            # Duplicate scan check
+            # 1️⃣ Duplicate scan check
             if lastScan is not None:
                 last_code = lastScan["Barcode4"] or lastScan["Barcode3"] or lastScan["Barcode2"] or lastScan["Barcode"]
                 if code == last_code and not (
@@ -103,7 +115,7 @@ if st.button("📷 Scan Now"):
                     notify(f"ไม่สามารถสแกน {code} ซ้ำได้", "warning")
                     st.stop()
 
-            # Skip-step validation
+            # 2️⃣ Skip-step validation
             if code == "S2" and (lastScan is None or pd.isna(lastScan["Barcode"])):
                 notify("ไม่พบ S1 ล่าสุด ไม่สามารถข้ามไป S2 ได้", "error")
                 st.stop()
@@ -114,7 +126,7 @@ if st.button("📷 Scan Now"):
                 notify("ไม่พบ S3 ล่าสุด ไม่สามารถข้ามไป S4 ได้", "error")
                 st.stop()
 
-            # Patch-like behavior
+            # 3️⃣ Patch-like behavior
             if code == "S1":
                 new_row = {
                     "ทะเบียนรถ": plate,
@@ -155,13 +167,13 @@ if st.button("📷 Scan Now"):
         st.error(f"❌ บันทึกข้อมูลไม่สำเร็จ: {e}")
 
 # ============================================
-# Display data
+# 📋 Display Table
 # ============================================
 st.divider()
-st.subheader("📋 ข้อมูลทั้งหมดใน Google Sheet")
+st.subheader("📊 ข้อมูลทั้งหมดใน Google Sheet")
+
 try:
     df = get_all_scans()
     st.dataframe(df)
 except Exception as e:
     st.error(f"Cannot fetch Google Sheet: {e}")
-
