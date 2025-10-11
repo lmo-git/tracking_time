@@ -1,7 +1,8 @@
-streamlit 
-pandas 
-gspread 
-google-auth 
-pyzbar 
-opencv-python 
+streamlit
+pandas
+gspread
+google-auth
 Pillow
+pyzbar
+opencv-python
+
