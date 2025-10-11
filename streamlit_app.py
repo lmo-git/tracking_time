@@ -46,7 +46,7 @@ colStations = pd.DataFrame({
 # ============================================
 # 🧍 Streamlit UI
 # ============================================
-st.title("🚛 ระบบสแกนสถานีขนส่ง (QR Code Version)")
+st.title("🚛 ระบบ Tracking Time - TCRY")
 
 plate = st.text_input("ทะเบียนรถ (Plate Number):")
 
