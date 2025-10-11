@@ -209,20 +209,33 @@ elif page == "📋 Billing Page":
         "อื่นๆ (ระบุ)"
     ]
     reason = st.selectbox("สาเหตุ (เลือกถ้ามี):", reason_options)
+# ✅ ดึงเวลา S3 ล่าสุดจาก sheet scan
+latest_s3_time = ""
+if plate:
+    s3_records = df_scan[(df_scan["ทะเบียนรถ"] == plate) & (df_scan["Barcode3"] == "S3")]
+    if not s3_records.empty:
+        # ดึง record ล่าสุด
+        latest_row = s3_records.sort_values("ScanDateTime", ascending=False).iloc[0]
+        latest_s3_time = latest_row["Time3"]
+        st.info(f"🕒 เวลาที่สแกน S3 ล่าสุดของรถ {plate}: **{latest_s3_time}**")
+    else:
+        st.warning(f"⚠️ ยังไม่พบการสแกน S3 ของทะเบียน {plate}")
 
-    if st.button("💾 บันทึกข้อมูล"):
-        try:
-            tz = pytz.timezone("Asia/Bangkok")
-            ts = datetime.now(tz)
-            new_row = {
-                "ทะเบียนรถ": plate,
-                "สาเหตุ": reason,
-                "วันที่เวลา": ts.strftime("%Y-%m-%d %H:%M:%S")
-            }
-            append_to_billing(new_row)
-            st.success(f"✅ บันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
-        except Exception as e:
-            st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
+# ✅ ปุ่มบันทึกข้อมูล Billing
+if st.button("💾 บันทึกข้อมูล Billing"):
+    try:
+        tz = pytz.timezone("Asia/Bangkok")
+        ts = datetime.now(tz)
+        new_row = {
+            "ทะเบียนรถ": plate,
+            "สาเหตุ": reason,
+            "เวลา S3 ล่าสุด": latest_s3_time,  # ✅ เพิ่มคอลัมน์ใหม่
+            "วันที่เวลา": ts.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        append_to_billing(new_row)
+        st.success(f"✅ บันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
+    except Exception as e:
+        st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
 
     st.divider()
     st.subheader("📊 ข้อมูลใน Google Sheet (billing)")
