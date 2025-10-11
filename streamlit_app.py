@@ -8,7 +8,7 @@ from datetime import datetime
 # 🔐 Google Sheets Connection (via Streamlit Secrets)
 # ============================================
 SHEET_KEY = "1jRUsA6AxPVlPLeVgFexPYTRZycFCq72oevYQsISuMUs"
-SHEET_NAME = "sheet1"
+SHEET_NAME = "scan"
 
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
