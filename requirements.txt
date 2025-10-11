@@ -1,4 +1,7 @@
 streamlit 
 pandas 
 gspread 
-google-auth
+google-auth 
+pyzbar 
+opencv-python 
+Pillow

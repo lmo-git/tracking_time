@@ -3,9 +3,12 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+from PIL import Image
+from pyzbar.pyzbar import decode
+import io
 
 # ============================================
-# 🔐 Google Sheets Connection (via Streamlit Secrets)
+# 🔐 Google Sheets Connection
 # ============================================
 SHEET_KEY = "1jRUsA6AxPVlPLeVgFexPYTRZycFCq72oevYQsISuMUs"
 SHEET_NAME = "scan"
@@ -15,49 +18,63 @@ scopes = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-# Load credentials from Streamlit secrets
 json_key = st.secrets["gcp"]
 creds = Credentials.from_service_account_info(json_key, scopes=scopes)
 gc = gspread.authorize(creds)
-
-try:
-    sheet = gc.open_by_key(SHEET_KEY).worksheet(SHEET_NAME)
-except Exception as e:
-    st.error(f"❌ Cannot open Google Sheet: {e}")
-    st.stop()
+sheet = gc.open_by_key(SHEET_KEY).worksheet(SHEET_NAME)
 
 # ============================================
-# 🧾 Ensure header row exists
+# 🧾 Ensure Header Exists
 # ============================================
 expected_headers = [
     "ทะเบียนรถ", "Barcode", "Barcode2", "Barcode3", "Barcode4",
     "Station", "Station2", "Station3", "Station4",
     "Time", "Time2", "Time3", "Time4", "สาเหตุ", "ScanDateTime"
 ]
-
-try:
-    headers = sheet.row_values(1)
-    if headers != expected_headers:
-        sheet.insert_row(expected_headers, 1)
-        st.info("🧩 Header row created automatically in Google Sheet.")
-except Exception as e:
-    st.warning(f"Could not verify header row: {e}")
+headers = sheet.row_values(1)
+if headers != expected_headers:
+    sheet.insert_row(expected_headers, 1)
 
 # ============================================
-# 🚗 Mock Stations (colStations)
+# 📍 Mock Stations
 # ============================================
 colStations = pd.DataFrame({
     "Code": ["S1", "S2", "S3", "S4"],
-    "Name": ["รับรถเข้า", "ชั่งเข้า", "โหลดสินค้า", "ชั่งออก"]
+    "Name": ["ขึ้นสินค้า", "ขึ้นสินค้าเสร็จ", "ส่งเอกสาร", "ออกเอกสารเสร็จ"]
 })
 
 # ============================================
 # 🧍 Streamlit UI
 # ============================================
-st.title("🚛 Time Tracking System")
+st.title("🚛 ระบบสแกนสถานีขนส่ง (QR Code Version)")
+
 plate = st.text_input("ทะเบียนรถ (Plate Number):")
-barcode_input = st.text_input("Barcode code (S1 / S2 / S3 / S4):")
-reason = st.text_input("เหตุผล (ถ้ามี):")
+
+reason_options = [
+    "",
+    "เก็บป้ายมอบมาไม่ครบ",
+    "ขึ้นงานไม่ครบตามแผน",
+    "รวมยอดสินค้าผิด",
+    "ใส่จำนวน/ประเภทพาเลทผิด",
+    "อื่นๆ (ระบุ)"
+]
+reason = st.selectbox("สาเหตุ (เลือกถ้ามี):", reason_options)
+
+# ============================================
+# 📷 Camera QR Scanner
+# ============================================
+st.markdown("### 📷 สแกน QR Code (S1 / S2 / S3 / S4)")
+img_file = st.camera_input("แตะเพื่อเปิดกล้องแล้วสแกน QR Code")
+
+barcode_input = None
+if img_file is not None:
+    image = Image.open(io.BytesIO(img_file.getvalue()))
+    decoded_objects = decode(image)
+    if decoded_objects:
+        barcode_input = decoded_objects[0].data.decode("utf-8").strip().upper()
+        st.success(f"🎯 ตรวจพบ QR Code: {barcode_input}")
+    else:
+        st.warning("⚠️ ไม่พบ QR Code ในภาพ กรุณาสแกนใหม่")
 
 # ============================================
 # 🔧 Helper Functions
@@ -67,16 +84,13 @@ def lookup_station(code):
     return match["Name"].iloc[0] if not match.empty else "Unknown Station"
 
 def get_all_scans():
-    """Retrieve all scan records from Google Sheet"""
     data = sheet.get_all_records()
     return pd.DataFrame(data) if data else pd.DataFrame(columns=expected_headers)
 
 def append_to_sheet(row_dict):
-    """Add new scan row"""
     sheet.append_row(list(row_dict.values()))
 
 def update_last_row(index, row_dict):
-    """Update existing row by DataFrame index"""
     for i, (k, v) in enumerate(row_dict.items(), start=1):
         sheet.update_cell(index + 2, i, v)
 
@@ -89,18 +103,16 @@ def notify(message, type="info"):
         st.info(message)
 
 # ============================================
-# 🧠 Main Logic
+# 🧠 Main Logic: Trigger on QR Scan
 # ============================================
-if st.button("📷 Scan Now"):
-    try:
-        ts = datetime.now()
-        if not plate.strip():
-            notify("กรุณากรอกทะเบียนรถก่อนสแกน", "warning")
-        elif not barcode_input.strip():
-            notify("กรุณากรอก Barcode (S1/S2/S3/S4)", "warning")
-        else:
+if barcode_input:
+    code = barcode_input
+    if code not in ["S1", "S2", "S3", "S4"]:
+        st.error("⚠️ QR Code ไม่ถูกต้อง (ต้องเป็น S1, S2, S3 หรือ S4 เท่านั้น)")
+    else:
+        try:
+            ts = datetime.now()
             df = get_all_scans()
-            code = barcode_input.strip().upper()
             staName = lookup_station(code)
             lastScan = df[df["ทะเบียนรถ"] == plate].sort_values("ScanDateTime", ascending=False).head(1)
             lastScan = lastScan.iloc[0] if not lastScan.empty else None
@@ -126,7 +138,7 @@ if st.button("📷 Scan Now"):
                 notify("ไม่พบ S3 ล่าสุด ไม่สามารถข้ามไป S4 ได้", "error")
                 st.stop()
 
-            # 3️⃣ Patch-like behavior
+            # 3️⃣ Save to Google Sheet
             if code == "S1":
                 new_row = {
                     "ทะเบียนรถ": plate,
@@ -158,19 +170,16 @@ if st.button("📷 Scan Now"):
                 update_dict["ScanDateTime"] = ts.strftime("%Y-%m-%d %H:%M:%S")
                 update_last_row(idx, update_dict)
 
-            else:
-                notify(f"Unknown scan code: {code}", "warning")
+            st.success(f"✅ สแกน {code} สำเร็จ และบันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
 
-            st.success(f"✅ บันทึกสำเร็จ @ {ts.strftime('%d/%m/%Y %H:%M')}")
-
-    except Exception as e:
-        st.error(f"❌ บันทึกข้อมูลไม่สำเร็จ: {e}")
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
 
 # ============================================
-# 📋 Display Table
+# 📊 Display Google Sheet Data
 # ============================================
 st.divider()
-st.subheader("📊 ข้อมูลทั้งหมดใน Google Sheet")
+st.subheader("📋 ข้อมูลทั้งหมดใน Google Sheet")
 
 try:
     df = get_all_scans()
