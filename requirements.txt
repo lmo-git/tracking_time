@@ -1,1 +1,1 @@
-streamlit
+streamlit pandas gspread google-auth
