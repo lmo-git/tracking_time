@@ -32,8 +32,23 @@ billing_sheet = gc.open_by_key(SHEET_KEY).worksheet(BILLING_SHEET)
 # ============================================
 def get_all_scans():
     """โหลดข้อมูลจาก sheet scan"""
-    data = scan_sheet.get_all_records()
-    return pd.DataFrame(data) if data else pd.DataFrame(columns=["ทะเบียนรถ"])
+    try:
+        data = scan_sheet.get_all_records()
+        # Always return DataFrame
+        df = pd.DataFrame(data)
+        if df.empty:
+            # ensure schema even if sheet is empty
+            df = pd.DataFrame(columns=[
+                "ทะเบียนรถ", "Barcode", "Barcode2", "Barcode3", "Barcode4",
+                "Station", "Station2", "Station3", "Station4",
+                "Time", "Time2", "Time3", "Time4", "สาเหตุ", "ScanDateTime"
+            ])
+        df.columns = df.columns.astype(str).str.strip()
+        return df
+    except Exception as e:
+        st.error(f"❌ โหลดข้อมูลจาก Google Sheet ไม่ได้: {e}")
+        return pd.DataFrame(columns=["ทะเบียนรถ"])
+
 
 def append_to_billing(row_dict):
     """บันทึกข้อมูลลง sheet billing"""
