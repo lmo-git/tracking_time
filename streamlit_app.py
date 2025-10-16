@@ -31,9 +31,23 @@ billing_sheet = gc.open_by_key(SHEET_KEY).worksheet(BILLING_SHEET)
 # 📍 Helper Functions
 # ============================================
 def get_all_scans():
-    """โหลดข้อมูลจาก sheet scan"""
-    data = scan_sheet.get_all_records()
-    return pd.DataFrame(data) if data else pd.DataFrame(columns=["ทะเบียนรถ"])
+    """โหลดข้อมูลจาก sheet scan (ดึงทุกแถวจาก Google Sheets)"""
+    data = scan_sheet.get_all_values()  # ดึงค่าทั้งหมด (รวม header)
+    
+    # ถ้ามีข้อมูลใน sheet
+    if len(data) > 1:
+        headers = data[0]                       # แถวแรกเป็นชื่อคอลัมน์
+        rows = data[1:]                         # ข้อมูลจริงตั้งแต่แถวที่สอง
+        df = pd.DataFrame(rows, columns=headers)
+    elif len(data) == 1:
+        # มีแต่ header แถวเดียว
+        df = pd.DataFrame(columns=data[0])
+    else:
+        # ไม่มีข้อมูลเลย
+        df = pd.DataFrame(columns=["ColumnA"])
+    
+    return df
+
 
 def append_to_billing(row_dict):
     """บันทึกข้อมูลลง sheet billing"""
@@ -101,6 +115,10 @@ if page == "📷 Scan Page":
         scan_sheet.append_row(list(row_dict.values()))
 
     # 🧠 Main Logic
+    if not plate.strip():
+       st.warning("⚠️ กรุณากรอกทะเบียนรถก่อนสแกน QR Code")
+       st.stop()
+
     if barcode_input:
         code = barcode_input
         if code not in ["S1", "S2", "S3", "S4"]:
@@ -189,12 +207,29 @@ elif page == "📋 Billing Page":
     with st.expander("🔒 ใส่รหัสเพื่อเข้าหน้า Billing"):
         access_code = st.text_input("กรอกรหัสผ่านเพื่อเข้าหน้า Billing:", type="password")
         if access_code != "TCRY2025":
-            st.warning("❌ กรุณากรอกรหัสผ่านที่ถูกต้อง (Hint: TCRY2025)")
+            st.warning("❌ กรุณากรอกรหัสผ่านที่ถูกต้อง")
             st.stop()
 
-    # ✅ เมื่อกรอกรหัสถูกต้องแล้ว
-    df_scan = get_all_scans()
-    unique_plates = sorted(df_scan["ทะเบียนรถ"].dropna().unique())
+# ✅ โหลดข้อมูลจาก sheet
+df_scan = get_all_scans()
+
+# ✅ ตรวจว่ามีข้อมูลและมีคอลัมน์อย่างน้อย 1 คอลัมน์
+if not df_scan.empty and df_scan.shape[1] > 0:
+    # ใช้คอลัมน์แรก (Column A)
+    unique_plates = (
+        df_scan.iloc[:, 0]                # เลือกคอลัมน์แรก
+        .astype(str)                      # แปลงเป็น string ป้องกัน error ถ้ามี None หรือ float
+        .str.strip()                      # ตัดช่องว่างหัวท้าย
+        .replace("", pd.NA)               # แทนค่าว่างด้วย NA
+        .dropna()                         # ลบค่าว่าง
+        .unique()                         # เอาค่าที่ไม่ซ้ำ
+        .tolist()                         # แปลงเป็น list
+    )
+    unique_plates = sorted(unique_plates)
+else:
+    unique_plates = []
+    st.warning("⚠️ ไม่มีข้อมูลใน sheet scan หรือไม่มีคอลัมน์")
+
 
     plate = st.selectbox("เลือกทะเบียนรถจากฐานข้อมูล:", unique_plates)
 
