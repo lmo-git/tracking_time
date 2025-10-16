@@ -218,12 +218,12 @@ elif page == "📋 Billing Page":
         # ใช้คอลัมน์แรก (Column A)
         unique_plates = (
             df_scan.iloc[:, 0]                # เลือกคอลัมน์แรก
-            .astype(str)                      # ป้องกัน None/float
-            .str.strip()                      # ตัดช่องว่าง
-            .replace("", pd.NA)               # แทนค่าว่างด้วย NA
-            .dropna()                         # ลบค่าว่าง
-            .unique()                         # เอาค่าที่ไม่ซ้ำ
-            .tolist()                         # เป็น list
+            .astype(str)
+            .str.strip()
+            .replace("", pd.NA)
+            .dropna()
+            .unique()
+            .tolist()
         )
         unique_plates = sorted(unique_plates)
     else:
@@ -251,13 +251,25 @@ elif page == "📋 Billing Page":
             try:
                 tz = pytz.timezone("Asia/Bangkok")
                 ts = datetime.now(tz)
+
+                # ✅ ดึงค่า Time3 (คอลัมน์ K = index 10) ของทะเบียนล่าสุด
+                df_filtered = df_scan[df_scan.iloc[:, 0].astype(str).str.strip() == plate]
+                if not df_filtered.empty and df_filtered.shape[1] > 10:
+                    last_time3 = df_filtered.iloc[-1, 10]  # คอลัมน์ที่ 11 (K)
+                else:
+                    last_time3 = ""
+
+                # ✅ เตรียมข้อมูลสำหรับบันทึก
                 new_row = {
                     "ทะเบียนรถ": plate,
                     "สาเหตุ": reason,
+                    "Time3": last_time3,
                     "วันที่เวลา": ts.strftime("%Y-%m-%d %H:%M:%S")
                 }
+
                 append_to_billing(new_row)
-                st.success(f"✅ บันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
+                st.success(f"✅ บันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')} (Time3: {last_time3})")
+
             except Exception as e:
                 st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
 
