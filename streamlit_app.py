@@ -255,7 +255,7 @@ elif page == "📋 Billing Page":
                 # ✅ ดึงค่า Time3 (คอลัมน์ K = index 10) ของทะเบียนล่าสุด
                 df_filtered = df_scan[df_scan.iloc[:, 0].astype(str).str.strip() == plate]
                 if not df_filtered.empty and df_filtered.shape[1] > 10:
-                    last_time3 = df_filtered.iloc[-1, 10]  # คอลัมน์ที่ 11 (K)
+                    last_time3 = df_filtered.iloc[-1, 11]  # คอลัมน์ที่ 11 (K)
                 else:
                     last_time3 = ""
 
