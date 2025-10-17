@@ -48,6 +48,24 @@ def get_all_scans():
     
     return df
 
+def lookup_station(code):
+    match = colStations[colStations["Code"] == code]
+    return match["Name"].iloc[0] if not match.empty else "Unknown Station"
+
+def update_last_row(index, row_dict, sheet):
+    for i, (k, v) in enumerate(row_dict.items(), start=1):
+        sheet.update_cell(index + 2, i, v)
+
+def notify(message, type="info"):
+    if type == "warning":
+        st.warning(message)
+    elif type == "error":
+        st.error(message)
+    else:
+        st.info(message)
+
+def append_to_sheet(row_dict):
+    scan_sheet.append_row(list(row_dict.values()))
 
 def append_to_billing(row_dict):
     """บันทึกข้อมูลลง sheet billing"""
@@ -75,127 +93,121 @@ if page == "📷 Scan Page":
     reason_checked = st.checkbox("สาเหตุ: สแกนซ้ำ")
     reason = "สแกนซ้ำ" if reason_checked else ""
 
-    # 📷 QR Scanner
-    st.markdown("### 📷 สแกน QR Code (S1 / S2 / S3 / S4)")
-    img_file = st.camera_input("แตะเพื่อเปิดกล้องแล้วสแกน QR Code")
+   st.markdown("### 📷 สแกน QR Code (S1 / S2 / S3 / S4)")
+img_file = st.camera_input("แตะเพื่อเปิดกล้องแล้วสแกน QR Code")
 
-    barcode_input = None
-    if img_file is not None:
-        image = Image.open(io.BytesIO(img_file.getvalue()))
-        decoded_objects = decode(image)
-        if decoded_objects:
-            barcode_input = decoded_objects[0].data.decode("utf-8").strip().upper()
-            st.success(f"🎯 ตรวจพบ QR Code: {barcode_input}")
-        else:
-            st.warning("⚠️ ไม่พบ QR Code ในภาพ กรุณาสแกนใหม่")
+barcode_input = None
+if img_file is not None:
+    image = Image.open(io.BytesIO(img_file.getvalue()))
+    decoded_objects = decode(image)
+    if decoded_objects:
+        barcode_input = decoded_objects[0].data.decode("utf-8").strip().upper()
+        st.success(f"🎯 ตรวจพบ QR Code: {barcode_input}")
+    else:
+        st.warning("⚠️ ไม่พบ QR Code ในภาพ กรุณาสแกนใหม่")
 
-    def lookup_station(code):
-        match = colStations[colStations["Code"] == code]
-        return match["Name"].iloc[0] if not match.empty else "Unknown Station"
+# ============================================
+# 🧠 Main Logic
+# ============================================
+if not plate.strip():
+    st.warning("⚠️ กรุณากรอกทะเบียนรถก่อนสแกน QR Code")
+    st.stop()
 
-    def update_last_row(index, row_dict, sheet):
-        for i, (k, v) in enumerate(row_dict.items(), start=1):
-            sheet.update_cell(index + 2, i, v)
+if barcode_input:
+    code = barcode_input
+    if code not in ["S1", "S2", "S3", "S4"]:
+        st.error("⚠️ QR Code ไม่ถูกต้อง (ต้องเป็น S1, S2, S3 หรือ S4 เท่านั้น)")
+    else:
+        try:
+            tz = pytz.timezone("Asia/Bangkok")
+            ts = datetime.now(tz)
+            df = get_all_scans()
+            staName = lookup_station(code)
+            lastScan = df[df["ทะเบียนรถ"] == plate].sort_values("ScanDateTime", ascending=False).head(1)
+            lastScan = lastScan.iloc[0] if not lastScan.empty else None
 
-    def notify(message, type="info"):
-        if type == "warning":
-            st.warning(message)
-        elif type == "error":
-            st.error(message)
-        else:
-            st.info(message)
+            # ✅ Define Station Order
+            station_order = {"S1": 1, "S2": 2, "S3": 3, "S4": 4}
 
-    expected_headers = [
-        "ทะเบียนรถ", "Barcode", "Barcode2", "Barcode3", "Barcode4",
-        "Station", "Station2", "Station3", "Station4",
-        "Time", "Time2", "Time3", "Time4", "สาเหตุ", "ScanDateTime"
-    ]
+            if lastScan is not None:
+                # หา station ล่าสุดที่ไม่ว่าง
+                last_code = None
+                for c in ["Barcode4", "Barcode3", "Barcode2", "Barcode"]:
+                    if pd.notna(lastScan.get(c)) and lastScan[c] != "":
+                        last_code = lastScan[c]
+                        break
 
-    def append_to_sheet(row_dict):
-        scan_sheet.append_row(list(row_dict.values()))
-
-    # 🧠 Main Logic
-    if not plate.strip():
-       st.warning("⚠️ กรุณากรอกทะเบียนรถก่อนสแกน QR Code")
-       st.stop()
-
-    if barcode_input:
-        code = barcode_input
-        if code not in ["S1", "S2", "S3", "S4"]:
-            st.error("⚠️ QR Code ไม่ถูกต้อง (ต้องเป็น S1, S2, S3 หรือ S4 เท่านั้น)")
-        else:
-            try:
-                tz = pytz.timezone("Asia/Bangkok")
-                ts = datetime.now(tz)
-                df = get_all_scans()
-                staName = lookup_station(code)
-                lastScan = df[df["ทะเบียนรถ"] == plate].sort_values("ScanDateTime", ascending=False).head(1)
-                lastScan = lastScan.iloc[0] if not lastScan.empty else None
-
-                if lastScan is not None:
-                    last_code = lastScan["Barcode4"] or lastScan["Barcode3"] or lastScan["Barcode2"] or lastScan["Barcode"]
-                    if code == last_code and not (
-                        (code == "S3" and reason.strip() != "") or
-                        (code == "S4" and pd.notna(lastScan["สาเหตุ"]))
-                    ):
-                        notify(f"ไม่สามารถสแกน {code} ซ้ำได้", "warning")
-                        st.stop()
-
-                # ✅ Validate order
-                if code == "S2" and (lastScan is None or pd.isna(lastScan["Barcode"])):
-                    notify("ไม่พบ S1 ล่าสุด ไม่สามารถข้ามไป S2 ได้", "error")
-                    st.stop()
-                elif code == "S3" and (lastScan is None or pd.isna(lastScan["Barcode2"])):
-                    notify("ไม่พบ S2 ล่าสุด ไม่สามารถข้ามไป S3 ได้", "error")
-                    st.stop()
-                elif code == "S4" and (lastScan is None or pd.isna(lastScan["Barcode3"])):
-                    notify("ไม่พบ S3 ล่าสุด ไม่สามารถข้ามไป S4 ได้", "error")
+                # ✅ ห้ามสแกนสลับลำดับย้อนหลัง
+                if last_code and station_order[code] < station_order[last_code]:
+                    st.error(f"❌ ลำดับการสแกนไม่ถูกต้อง (ล่าสุดคือ {last_code} แต่พยายามสแกน {code})")
                     st.stop()
 
-                # ✅ Save to Google Sheet
-                if code == "S1":
-                    new_row = {
-                        "ทะเบียนรถ": plate,
-                        "Barcode": "S1",
-                        "Barcode2": "",
-                        "Barcode3": "",
-                        "Barcode4": "",
-                        "Station": staName,
-                        "Station2": "",
-                        "Station3": "",
-                        "Station4": "",
-                        "Time": ts.strftime("%H:%M:%S"),
-                        "Time2": "",
-                        "Time3": "",
-                        "Time4": "",
-                        "สาเหตุ": "",
-                        "ScanDateTime": ts.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    append_to_sheet(new_row)
+                # ✅ ห้ามข้ามสถานี
+                if last_code and station_order[code] > station_order[last_code] + 1:
+                    expected_next = [k for k, v in station_order.items() if v == station_order[last_code] + 1][0]
+                    st.error(f"⚠️ ไม่สามารถข้ามจาก {last_code} ไป {code} ได้ ต้องสแกน {expected_next} ก่อน")
+                    st.stop()
 
-                elif code in ["S2", "S3", "S4"] and lastScan is not None:
-                    idx = lastScan.name
-                    update_dict = lastScan.to_dict()
-                    update_dict[f"Barcode{code[-1]}"] = code
-                    update_dict[f"Station{code[-1]}"] = staName
-                    update_dict[f"Time{code[-1]}"] = ts.strftime("%H:%M:%S")
-                    if code == "S3":
-                        update_dict["สาเหตุ"] = reason.strip()
-                    update_dict["ScanDateTime"] = ts.strftime("%Y-%m-%d %H:%M:%S")
-                    update_last_row(idx, update_dict, scan_sheet)
+                # ✅ ห้ามสแกนซ้ำโดยไม่มีเหตุผล
+                if code == last_code and not (
+                    (code == "S3" and reason.strip() != "") or
+                    (code == "S4" and pd.notna(lastScan["สาเหตุ"]))
+                ):
+                    notify(f"ไม่สามารถสแกน {code} ซ้ำได้", "warning")
+                    st.stop()
 
-                st.success(f"✅ สแกน {code} สำเร็จ และบันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
+            # ✅ ต้องเริ่มจาก S1 เสมอ
+            if code != "S1" and lastScan is None:
+                st.error("❌ ต้องเริ่มจากการสแกน S1 ก่อนเท่านั้น")
+                st.stop()
 
-            except Exception as e:
-                st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
+            # ✅ Save to Google Sheet
+            if code == "S1":
+                new_row = {
+                    "ทะเบียนรถ": plate,
+                    "Barcode": "S1",
+                    "Barcode2": "",
+                    "Barcode3": "",
+                    "Barcode4": "",
+                    "Station": staName,
+                    "Station2": "",
+                    "Station3": "",
+                    "Station4": "",
+                    "Time": ts.strftime("%H:%M:%S"),
+                    "Time2": "",
+                    "Time3": "",
+                    "Time4": "",
+                    "สาเหตุ": "",
+                    "ScanDateTime": ts.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                append_to_sheet(new_row)
 
-    st.divider()
-    st.subheader("📋 ข้อมูลทั้งหมดใน Google Sheet (scan)")
-    try:
-        df = get_all_scans()
-        st.dataframe(df)
-    except Exception as e:
-        st.error(f"Cannot fetch Google Sheet: {e}")
+            elif code in ["S2", "S3", "S4"] and lastScan is not None:
+                idx = lastScan.name
+                update_dict = lastScan.to_dict()
+                update_dict[f"Barcode{code[-1]}"] = code
+                update_dict[f"Station{code[-1]}"] = staName
+                update_dict[f"Time{code[-1]}"] = ts.strftime("%H:%M:%S")
+                if code == "S3":
+                    update_dict["สาเหตุ"] = reason.strip()
+                update_dict["ScanDateTime"] = ts.strftime("%Y-%m-%d %H:%M:%S")
+                update_last_row(idx, update_dict, scan_sheet)
+
+            st.success(f"✅ สแกน {code} สำเร็จ และบันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
+
+        except Exception as e:
+            st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
+
+# ============================================
+# 📋 แสดงข้อมูลทั้งหมดใน Sheet
+# ============================================
+st.divider()
+st.subheader("📋 ข้อมูลทั้งหมดใน Google Sheet (scan)")
+try:
+    df = get_all_scans()
+    st.dataframe(df)
+except Exception as e:
+    st.error(f"Cannot fetch Google Sheet: {e}")
 
 # ============================================
 # 💳 PAGE 2: Billing Page (Protected)
