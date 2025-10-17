@@ -118,8 +118,12 @@ if page == "📷 Scan Page":
                 lastScan = df[df["ทะเบียนรถ"] == plate].sort_values("ScanDateTime", ascending=False).head(1)
                 lastScan = lastScan.iloc[0] if not lastScan.empty else None
 
+                # ลำดับสถานี
                 station_order = {"S1": 1, "S2": 2, "S3": 3, "S4": 4}
 
+                # ==========================================================
+                # ✅ ตรวจสอบลำดับ และอนุญาตให้เริ่มรอบใหม่หลังจบ S4
+                # ==========================================================
                 if lastScan is not None:
                     last_code = None
                     for c in ["Barcode4", "Barcode3", "Barcode2", "Barcode"]:
@@ -127,26 +131,38 @@ if page == "📷 Scan Page":
                             last_code = lastScan[c]
                             break
 
-                    if last_code and station_order[code] < station_order[last_code]:
-                        st.error(f"❌ ลำดับการสแกนไม่ถูกต้อง (ล่าสุดคือ {last_code} แต่พยายามสแกน {code})")
-                        st.stop()
+                    # ✅ อนุญาตให้เริ่มรอบใหม่ถ้าสแกนครบถึง S4 แล้ว
+                    if last_code == "S4" and code == "S1":
+                        st.info("เริ่มรอบใหม่หลังจากจบรอบ S4 แล้ว ✅")
+                        lastScan = None  # รีเซ็ตให้เริ่มแถวใหม่
+                    else:
+                        # ตรวจห้ามย้อนลำดับ
+                        if last_code and station_order[code] < station_order[last_code]:
+                            st.error(f"❌ ลำดับการสแกนไม่ถูกต้อง (ล่าสุดคือ {last_code} แต่พยายามสแกน {code})")
+                            st.stop()
 
-                    if last_code and station_order[code] > station_order[last_code] + 1:
-                        expected_next = [k for k, v in station_order.items() if v == station_order[last_code] + 1][0]
-                        st.error(f"⚠️ ไม่สามารถข้ามจาก {last_code} ไป {code} ได้ ต้องสแกน {expected_next} ก่อน")
-                        st.stop()
+                        # ตรวจห้ามข้ามลำดับ
+                        if last_code and station_order[code] > station_order[last_code] + 1:
+                            expected_next = [k for k, v in station_order.items() if v == station_order[last_code] + 1][0]
+                            st.error(f"⚠️ ไม่สามารถข้ามจาก {last_code} ไป {code} ได้ ต้องสแกน {expected_next} ก่อน")
+                            st.stop()
 
-                    if code == last_code and not (
-                        (code == "S3" and reason.strip() != "") or
-                        (code == "S4" and pd.notna(lastScan["สาเหตุ"]))
-                    ):
-                        notify(f"ไม่สามารถสแกน {code} ซ้ำได้", "warning")
-                        st.stop()
+                        # ตรวจสแกนซ้ำ
+                        if code == last_code and not (
+                            (code == "S3" and reason.strip() != "") or
+                            (code == "S4" and pd.notna(lastScan["สาเหตุ"]))
+                        ):
+                            notify(f"ไม่สามารถสแกน {code} ซ้ำได้", "warning")
+                            st.stop()
 
+                # ต้องเริ่มจาก S1 ถ้ายังไม่มี record
                 if code != "S1" and lastScan is None:
                     st.error("❌ ต้องเริ่มจากการสแกน S1 ก่อนเท่านั้น")
                     st.stop()
 
+                # ==========================================================
+                # ✅ บันทึกข้อมูลตามขั้นตอน
+                # ==========================================================
                 if code == "S1":
                     new_row = {
                         "ทะเบียนรถ": plate,
@@ -166,6 +182,7 @@ if page == "📷 Scan Page":
                         "ScanDateTime": ts.strftime("%Y-%m-%d %H:%M:%S")
                     }
                     append_to_sheet(new_row)
+
                 elif code in ["S2", "S3", "S4"] and lastScan is not None:
                     idx = lastScan.name
                     update_dict = lastScan.to_dict()
@@ -182,6 +199,9 @@ if page == "📷 Scan Page":
             except Exception as e:
                 st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
 
+    # ==========================================================
+    # ✅ แสดงตารางข้อมูลทั้งหมด
+    # ==========================================================
     st.divider()
     st.subheader("📋 ข้อมูลทั้งหมดใน Google Sheet (scan)")
     try:
