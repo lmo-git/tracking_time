@@ -34,35 +34,25 @@ def get_all_scans():
     data = scan_sheet.get_all_values()
     if len(data) > 1:
         headers = data[0]
-        rows = data[1:]
-        df = pd.DataFrame(rows, columns=headers)
-    elif len(data) == 1:
-        df = pd.DataFrame(columns=data[0])
-    else:
-        df = pd.DataFrame(columns=["ColumnA"])
-    return df
-
-colStations = pd.DataFrame({
-    "Code": ["S1", "S2", "S3", "S4"],
-    "Name": ["ขึ้นสินค้า", "ขึ้นสินค้าเสร็จ", "ส่งเอกสาร", "ออกเอกสารเสร็จ"]
-})
+        df = pd.DataFrame(data[1:], columns=headers)
+        return df
+    return pd.DataFrame(columns=["ทะเบียนรถ","Barcode","Barcode2","Barcode3","Barcode4",
+                                 "Station","Station2","Station3","Station4",
+                                 "Time","Time2","Time3","Time4","สาเหตุ","ScanDateTime"])
 
 def lookup_station(code):
-    match = colStations[colStations["Code"] == code]
-    return match["Name"].iloc[0] if not match.empty else "Unknown Station"
+    table = {
+        "S1": "ขึ้นสินค้า",
+        "S2": "ขึ้นสินค้าเสร็จ",
+        "S3": "ส่งเอกสาร",
+        "S4": "ออกเอกสารเสร็จ"
+    }
+    return table.get(code, "Unknown")
 
-def update_last_row(index, row_dict, sheet):
+def update_last_row(sheet_index, row_dict, sheet):
     row_dict = {k: ("" if pd.isna(v) else v) for k, v in row_dict.items()}
-    for i, (k, v) in enumerate(row_dict.items(), start=1):
-        sheet.update_cell(index + 2, i, v)
-
-def notify(message, type="info"):
-    if type == "warning":
-        st.warning(message)
-    elif type == "error":
-        st.error(message)
-    else:
-        st.info(message)
+    for col_idx, (k, v) in enumerate(row_dict.items(), start=1):
+        sheet.update_cell(sheet_index + 2, col_idx, v)
 
 def append_to_sheet(row_dict):
     row_dict = {k: ("" if pd.isna(v) else v) for k, v in row_dict.items()}
@@ -72,11 +62,13 @@ def append_to_billing(row_dict):
     row_dict = {k: ("" if pd.isna(v) else v) for k, v in row_dict.items()}
     billing_sheet.append_row(list(row_dict.values()))
 
+
 # ============================================
 # 🕹️ Sidebar Navigation
 # ============================================
 st.sidebar.title("🔖 Navigation")
 page = st.sidebar.radio("เลือกหน้า", ["📷 Scan Page", "📋 Billing Page"])
+
 
 # ============================================
 # 🚛 PAGE 1: Scan Page
@@ -107,121 +99,115 @@ if page == "📷 Scan Page":
 
     if barcode_input:
         code = barcode_input
+
         if code not in ["S1", "S2", "S3", "S4"]:
-            st.error("⚠️ QR Code ไม่ถูกต้อง (ต้องเป็น S1, S2, S3 หรือ S4 เท่านั้น)")
-        else:
-            try:
-                tz = pytz.timezone("Asia/Bangkok")
-                ts = datetime.now(tz)
-                df = get_all_scans()
-                staName = lookup_station(code)
+            st.error("⚠️ QR Code ต้องเป็น S1 / S2 / S3 / S4 เท่านั้น")
+            st.stop()
 
-                # หาแถวล่าสุดของทะเบียนนี้
-                lastScan = df[df["ทะเบียนรถ"] == plate].sort_values(
-                    "ScanDateTime", ascending=False
-                ).head(1)
-                lastScan = lastScan.iloc[0] if not lastScan.empty else None
+        try:
+            tz = pytz.timezone("Asia/Bangkok")
+            ts = datetime.now(tz)
 
-                # ลำดับสถานี (ใช้กับ S2–S4)
-                station_order = {"S1": 1, "S2": 2, "S3": 3, "S4": 4}
+            df = get_all_scans()
+            staName = lookup_station(code)
 
-                # ============================================
-                # ✅ กรณี S1: เริ่มบรรทัดใหม่เสมอ ไม่ต้องจบ S4
-                # ============================================
-                if code == "S1":
-                    new_row = {
-                        "ทะเบียนรถ": plate,
-                        "Barcode": "S1",
-                        "Barcode2": "",
-                        "Barcode3": "",
-                        "Barcode4": "",
-                        "Station": staName,
-                        "Station2": "",
-                        "Station3": "",
-                        "Station4": "",
-                        "Time": ts.strftime("%H:%M:%S"),
-                        "Time2": "",
-                        "Time3": "",
-                        "Time4": "",
-                        "สาเหตุ": "",
-                        "ScanDateTime": ts.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                    append_to_sheet(new_row)
-                    st.success(f"✅ สแกน S1 สำเร็จ — เริ่มบรรทัดใหม่ @ {ts.strftime('%H:%M:%S')}")
-                else:
-                    # ============================================
-                    # 👉 S2 / S3 / S4: ต้องมี S1 มาก่อน (แถวล่าสุด)
-                    # ============================================
-                    if lastScan is None:
-                        st.error("❌ ยังไม่มีข้อมูล S1 ของทะเบียนนี้ กรุณาสแกน S1 ก่อน")
+            # ============================================
+            # หาแถวล่าสุดตาม ScanDateTime
+            # ============================================
+            df_filtered = df[df["ทะเบียนรถ"] == plate].copy()
+
+            if not df_filtered.empty:
+                df_filtered["ScanDateTime"] = pd.to_datetime(
+                    df_filtered["ScanDateTime"], errors="coerce"
+                )
+                df_filtered = df_filtered.sort_values("ScanDateTime", ascending=False)
+
+            lastScan = df_filtered.iloc[0] if not df_filtered.empty else None
+
+            station_order = {"S1": 1, "S2": 2, "S3": 3, "S4": 4}
+
+            # ======================================================
+            # S1 → เริ่มบรรทัดใหม่ทันที
+            # ======================================================
+            if code == "S1":
+                new_row = {
+                    "ทะเบียนรถ": plate,
+                    "Barcode": "S1",
+                    "Barcode2": "",
+                    "Barcode3": "",
+                    "Barcode4": "",
+                    "Station": staName,
+                    "Station2": "",
+                    "Station3": "",
+                    "Station4": "",
+                    "Time": ts.strftime("%H:%M:%S"),
+                    "Time2": "",
+                    "Time3": "",
+                    "Time4": "",
+                    "สาเหตุ": "",
+                    "ScanDateTime": ts.strftime("%Y-%m-%d %H:%M:%S")
+                }
+                append_to_sheet(new_row)
+                st.success(f"✅ สแกน S1 สำเร็จ — เริ่มแถวใหม่ @ {ts.strftime('%H:%M:%S')}")
+                st.stop()
+
+            # ======================================================
+            # S2 / S3 / S4 → ต้องมี S1 ล่าสุด
+            # ======================================================
+            if lastScan is None:
+                st.error("❌ ต้องสแกน S1 ก่อน")
+                st.stop()
+
+            sheet_index = df[df["ScanDateTime"] == lastScan["ScanDateTime"]].index[0]
+
+            # หา barcode ล่าสุด
+            last_code = None
+            for c in ["Barcode4", "Barcode3", "Barcode2", "Barcode"]:
+                if lastScan.get(c, "").strip():
+                    last_code = lastScan[c]
+                    break
+
+            # ลำดับการสแกน
+            if last_code:
+                if station_order[code] < station_order[last_code]:
+                    st.error(f"❌ ลำดับผิด (ล่าสุดคือ {last_code})")
+                    st.stop()
+
+                if station_order[code] > station_order[last_code] + 1:
+                    need = [k for k, v in station_order.items() if v == station_order[last_code] + 1][0]
+                    st.error(f"⚠️ ต้องสแกน {need} ก่อน")
+                    st.stop()
+
+                if code == last_code:
+                    if code == "S3":
+                        if not reason_checked:
+                            st.warning("❌ ต้องติ๊ก ✔ สแกนซ้ำ ก่อนสแกน S3 ซ้ำ")
+                            st.stop()
+                    else:
+                        st.warning(f"❌ ไม่สามารถสแกน {code} ซ้ำได้")
                         st.stop()
 
-                    # หา code ล่าสุดในแถว (จาก Barcode4 → Barcode3 → Barcode2 → Barcode)
-                    last_code = None
-                    for c in ["Barcode4", "Barcode3", "Barcode2", "Barcode"]:
-                        if c in lastScan.index:
-                            val = str(lastScan.get(c, "")).strip()
-                            if val != "":
-                                last_code = val
-                                break
+            # บันทึกข้อมูลลงแถวเดิม
+            update_dict = lastScan.to_dict()
+            pos = code[-1]
 
-                    # ถ้ามี last_code ค่อยตรวจลำดับ
-                    if last_code:
-                        # ห้ามย้อนลำดับ เช่น S3 → S2
-                        if station_order[code] < station_order[last_code]:
-                            st.error(f"❌ ลำดับการสแกนไม่ถูกต้อง (ล่าสุดคือ {last_code} แต่พยายามสแกน {code})")
-                            st.stop()
+            update_dict[f"Barcode{pos}"] = code
+            update_dict[f"Station{pos}"] = staName
+            update_dict[f"Time{pos}"] = ts.strftime("%H:%M:%S")
 
-                        # ห้ามข้ามลำดับ เช่น S2 → S4
-                        if station_order[code] > station_order[last_code] + 1:
-                            expected_next = [
-                                k for k, v in station_order.items()
-                                if v == station_order[last_code] + 1
-                            ][0]
-                            st.error(
-                                f"⚠️ ไม่สามารถข้ามจาก {last_code} ไป {code} ได้ ต้องสแกน {expected_next} ก่อน"
-                            )
-                            st.stop()
+            if code == "S3":
+                update_dict["สาเหตุ"] = reason
 
-                        # ============================
-                        # ✅ ตรวจสแกนซ้ำ
-                        # - อนุญาตเฉพาะ S3 ถ้าเลือกสแกนซ้ำ
-                        # ============================
-                        if code == last_code:
-                            if code == "S3":
-                                if not reason_checked:
-                                    notify("❌ สแกน S3 ซ้ำได้เฉพาะกรณีติ๊ก ✔ สแกนซ้ำ", "warning")
-                                    st.stop()
-                                # ถ้าติ๊กสแกนซ้ำ → อนุญาตให้ทับค่าเดิมได้
-                            else:
-                                notify(f"ไม่สามารถสแกน {code} ซ้ำได้", "warning")
-                                st.stop()
+            update_dict["ScanDateTime"] = ts.strftime("%Y-%m-%d %H:%M:%S")
 
-                    # ============================================
-                    # ✅ บันทึกข้อมูล S2 / S3 / S4 ลงแถวล่าสุด
-                    # ============================================
-                    idx = lastScan.name
-                    update_dict = lastScan.to_dict()
+            update_last_row(sheet_index, update_dict, scan_sheet)
+            st.success(f"✅ บันทึก {code} สำเร็จ @ {ts.strftime('%H:%M:%S')}")
 
-                    pos = code[-1]  # '2', '3', '4'
-                    update_dict[f"Barcode{pos}"] = code
-                    update_dict[f"Station{pos}"] = staName
-                    update_dict[f"Time{pos}"] = ts.strftime("%H:%M:%S")
-
-                    # ถ้าเป็น S3 ให้บันทึกสาเหตุ (ถ้ามี)
-                    if code == "S3":
-                        update_dict["สาเหตุ"] = reason.strip()
-
-                    update_dict["ScanDateTime"] = ts.strftime("%Y-%m-%d %H:%M:%S")
-
-                    update_last_row(idx, update_dict, scan_sheet)
-                    st.success(f"✅ สแกน {code} สำเร็จ และบันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')}")
-
-            except Exception as e:
-                st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
 
     # ==========================================================
-    # ✅ แสดงตารางข้อมูลทั้งหมด
+    # แสดงข้อมูลทั้งหมด
     # ==========================================================
     st.divider()
     st.subheader("📋 ข้อมูลทั้งหมดใน Google Sheet (scan)")
@@ -230,6 +216,7 @@ if page == "📷 Scan Page":
         st.dataframe(df)
     except Exception as e:
         st.error(f"Cannot fetch Google Sheet: {e}")
+
 
 # ============================================
 # 💳 PAGE 2: Billing Page
@@ -245,45 +232,38 @@ elif page == "📋 Billing Page":
 
     df_scan = get_all_scans()
 
-    if not df_scan.empty and df_scan.shape[1] > 0:
-        unique_plates = (
-            df_scan.iloc[:, 0]
-            .astype(str).str.strip().replace("", pd.NA).dropna().unique().tolist()
-        )
-        unique_plates = sorted(unique_plates)
+    if not df_scan.empty:
+        unique_plates = sorted(df_scan["ทะเบียนรถ"].astype(str).str.strip().unique())
     else:
         unique_plates = []
-        st.warning("⚠️ ไม่มีข้อมูลใน sheet scan หรือไม่มีคอลัมน์")
 
-    plate = st.selectbox("เลือกทะเบียนรถจากฐานข้อมูล:", unique_plates)
-    reason_options = [
-        "", "เก็บป้ายมอบมาไม่ครบ", "ขึ้นงานไม่ครบตามแผน",
-        "รวมยอดสินค้าผิด", "ใส่จำนวน/ประเภทพาเลทผิด", "อื่นๆ (ระบุ)"
-    ]
+    plate = st.selectbox("เลือกทะเบียนรถ:", unique_plates)
+    reason_options = ["", "เก็บป้ายมอบมาไม่ครบ", "ขึ้นงานไม่ครบตามแผน", "รวมยอดสินค้าผิด",
+                      "ใส่จำนวน/ประเภทพาเลทผิด", "อื่นๆ (ระบุ)"]
     reason = st.selectbox("สาเหตุ (เลือกถ้ามี):", reason_options)
 
     if st.button("💾 บันทึกข้อมูล Billing"):
-        if not plate:
-            st.warning("⚠️ กรุณาเลือกทะเบียนรถก่อนบันทึก")
-        else:
-            try:
-                tz = pytz.timezone("Asia/Bangkok")
-                ts = datetime.now(tz)
-                df_filtered = df_scan[df_scan.iloc[:, 0].astype(str).str.strip() == plate]
-                last_time3 = df_filtered.iloc[-1, 11] if not df_filtered.empty and df_filtered.shape[1] > 10 else ""
-                new_row = {
-                    "ทะเบียนรถ": plate,
-                    "สาเหตุ": reason,
-                    "Time3": last_time3,
-                    "วันที่เวลา": ts.strftime("%Y-%m-%d %H:%M:%S")
-                }
-                append_to_billing(new_row)
-                st.success(f"✅ บันทึกข้อมูลเรียบร้อย @ {ts.strftime('%H:%M:%S')} (Time3: {last_time3})")
-            except Exception as e:
-                st.error(f"❌ เกิดข้อผิดพลาดในการบันทึก: {e}")
+        try:
+            tz = pytz.timezone("Asia/Bangkok")
+            ts = datetime.now(tz)
+
+            df_filtered = df_scan[df_scan["ทะเบียนรถ"] == plate]
+            last_time3 = df_filtered["Time3"].iloc[-1] if not df_filtered.empty else ""
+
+            new_row = {
+                "ทะเบียนรถ": plate,
+                "สาเหตุ": reason,
+                "Time3": last_time3,
+                "วันที่เวลา": ts.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            append_to_billing(new_row)
+            st.success(f"✅ บันทึก Billing สำเร็จ (Time3: {last_time3})")
+
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
 
     st.divider()
-    st.subheader("📊 ข้อมูลใน Google Sheet (billing)")
+    st.subheader("📊 ข้อมูล Billings")
     try:
         df_billing = pd.DataFrame(billing_sheet.get_all_records())
         st.dataframe(df_billing)
